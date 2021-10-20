@@ -48,6 +48,7 @@
 import moment from "moment";
 import { mdiDragVerticalVariant } from "@mdi/js";
 import SvgIcon from "@jamescoyle/vue-icon";
+import throttle from "lodash.throttle";
 
 export default {
 	name: "ProjectGanttBar",
@@ -248,7 +249,7 @@ export default {
 				document.body.style.cursor = "w-resize";
 				this.mousemoveCallback = this.dragByHandleRight;
 			} else {
-				this.mousemoveCallback = this.drag;
+				this.mousemoveCallback = throttle(this.drag, 50);
 			}
 
 			window.addEventListener("mousemove", this.mousemoveCallback);

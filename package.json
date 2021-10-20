@@ -38,6 +38,7 @@
 	},
 	"dependencies": {
 		"@jamescoyle/vue-icon": "^0.1.2",
-		"@mdi/js": "^6.3.95"
+		"@mdi/js": "^6.3.95",
+		"lodash.throttle": "^4.1.1"
 	}
 }

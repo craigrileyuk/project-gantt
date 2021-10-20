@@ -148,7 +148,7 @@ export default {
 	background: #e8e8e8;
 	color: #424242;
 	font-size: 0.9em;
-	z-index: 3;
+	z-index: 10;
 	overflow: hidden;
 	font-weight: bold;
 }
