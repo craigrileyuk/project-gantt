@@ -1,37 +1,43 @@
 {
-  "name": "vue-ganttastic",
-  "version": "0.9.32",
-  "description": "A simple and customizable Gantt chart component for Vue.js",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/InfectoOne/vue-ganttastic"
-  },
-  "main": "./dist/index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "bili --name index --plugin vue --vue.css false"
-  },
-  "files": [
-    "dist/*"
-  ],
-  "keywords": [
-    "gantt",
-    "chart",
-    "bar",
-    "diagram",
-    "vue",
-    "vuejs",
-    "ganttastic"
-  ],
-  "author": "Marko Zunic",
-  "license": "MIT",
-  "devDependencies": {
-    "bili": "^4.10.0",
-    "rollup-plugin-vue": "^5.1.9",
-    "vue-template-compiler": "^2.6.10"
-  },
-  "peerDependencies": {
-    "moment": "^2.26.0"
-  },
-  "dependencies": {}
+	"name": "project-gantt",
+	"version": "0.9.32",
+	"description": "A simple and customizable Gantt chart component for Vue.js",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/craigrileyuk/project-gantt.git"
+	},
+	"main": "./dist/project-gantt.umd.js",
+	"module": "./dist/project-gantt.es.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1",
+		"build": "vite build",
+		"dev": "vite -c vite-demo.config.js"
+	},
+	"files": [
+		"dist/*"
+	],
+	"keywords": [
+		"gantt",
+		"chart",
+		"bar",
+		"diagram",
+		"vue",
+		"vuejs",
+		"ganttastic"
+	],
+	"author": "Marko Zunic",
+	"license": "MIT",
+	"devDependencies": {
+		"vite": "^2.6.10",
+		"vite-plugin-vue2": "^1.9.0",
+		"vue": "^2.6.14",
+		"vue-template-compiler": "^2.6.10"
+	},
+	"peerDependencies": {
+		"moment": "^2.26.0"
+	},
+	"dependencies": {
+		"@jamescoyle/vue-icon": "^0.1.2",
+		"@mdi/js": "^6.3.95"
+	}
 }

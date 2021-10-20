@@ -1,5 +1,4 @@
-import GGanttChart from "./GGanttChart.vue"
-import GGanttRow from "./GGanttRow.vue"
+import ProjectGanttChart from "./ProjectGanttChart.vue";
+import ProjectGanttRow from "./ProjectGanttRow.vue";
 
-
-export {GGanttChart, GGanttRow}
+export { ProjectGanttChart, ProjectGanttRow };

@@ -18,7 +18,7 @@ npm install moment
 ```
 
 ## Basic Usage
-Import the components <code>GGanttChart</code> and <code>GGanttRow</code>.  
+Import the components <code>ProjectGanttChart</code> and <code>ProjectGanttRow</code>.  
 Use <code>g-gantt-chart</code> in your template, pass the desired chart start and chart end time as props (<code>chart-start</code> and <code>chart-end</code>) and add <code>g-gantt-row</code>s
 to the default template slot.  
 Pass an array containing your bar objects to every row using the <code>bars</code> prop, while specifying the name of the properties in your bar objects that stand for the bar start and bar end time using the props <code>bar-start</code> and <code>bar-end</code>  
@@ -49,15 +49,15 @@ The following code showcases a simple usage example in a .vue SFC (Single File C
 
 <script>
 
-import {GGanttChart, GGanttRow} from 'vue-ganttastic'
+import {ProjectGanttChart, ProjectGanttRow} from 'vue-ganttastic'
 
 export default {
 
   ...
 
   components:{
-    GGanttChart,
-    GGanttRow
+    ProjectGanttChart,
+    ProjectGanttRow
   },
 
   data(){
