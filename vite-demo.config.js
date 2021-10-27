@@ -1,7 +1,8 @@
-const path = require("path");
-const { createVuePlugin } = require("vite-plugin-vue2");
+import path from "path";
+import vue from "@vitejs/plugin-vue";
+import { defineConfig } from "vite";
 
-module.exports = {
-	plugins: [createVuePlugin()],
+export default defineConfig({
+	plugins: [vue()],
 	root: process.cwd() + "/demo",
-};
+});

@@ -36,396 +36,390 @@
 					class="color-indicator"
 					:style="{ background: this.barStyle.background || this.barStyle.backgroundColor }"
 				/>
-				{{ bar[barStart] | TimeFilter }}
+				{{ TimeFilter(bar[props.barStart]) }}
 				-
-				{{ bar[barEnd] | TimeFilter }}
+				{{ TimeFilter(bar[props.barEnd]) }}
 			</div>
 		</transition>
 	</div>
 </template>
 
-<script>
+<script setup>
+import { inject } from "vue";
 import moment from "moment";
 import { mdiDragVerticalVariant } from "@mdi/js";
-import SvgIcon from "@jamescoyle/vue-icon";
+import SvgIcon from "vue3-icon";
 import throttle from "lodash.throttle";
 
-export default {
-	name: "ProjectGanttBar",
+const props = defineProps({
+	bar: { type: Object },
+	/* x */ barStart: { type: String }, // property name of the bar objects that represents the start datetime
+	/* x */ barEnd: { type: String }, // property name of the bar objects that represents the end datetiprops
+	/* x */ barContainer: [Object, DOMRect],
+	allBarsInRow: { type: Array },
+});
 
-	props: {
-		bar: { type: Object },
-		barStart: { type: String }, // property name of the bar objects that represents the start datetime
-		barEnd: { type: String }, // property name of the bar objects that represents the end datetime,
-		barContainer: [Object, DOMRect],
-		allBarsInRow: { type: Array },
+const getHourCount = inject("getHourCount");
+const ganttChartProps = inject("ganttChartProps");
+const initDragOfBarsFromBundle = inject("initDragOfBarsFromBundle");
+const moveBarsFromBundleOfPushedBar = inject("moveBarsFromBundleOfPushedBar");
+const setDragLimitsOfGanttBar = inject("setDragLimitsOfGanttBar");
+const onBarEvent = inject("onBarEvent");
+const onDragendBar = inject("onDragendBar");
+const getMinGapBetweenBars = inject("getMinGapBetweenBars");
+const snapMinutes = inject("snapMinutes");
+
+let showTooltip = $ref(false);
+let tooltipTimeout = $ref(null);
+
+let dragLimitLeft = $ref(null);
+let dragLimitRight = $ref(null);
+let isDragged = $ref(false);
+/**
+ * is this the bar that was clicked on when starting to drag or is it dragged along some other bar from the same bundle
+ */
+let isMainBarOfDrag = $ref(false);
+
+let cursorOffsetX = $ref(0);
+/**
+ * gets initialized when starting to drag possible values: drag, dragByHandleLeft, dragByHandleRight,
+ */
+let mousemoveCallback = $ref(null);
+
+let barStartBeforeDrag = $ref(null);
+let barEndBeforeDrag = $ref(null);
+
+const icons = {
+	mdiDragVerticalVariant,
+};
+
+/* ******************************************
+ * COMPUTED
+ ****************************************** */
+
+/**
+ * use these computed moment objects to work with the bar's start/end dates: instead of directly mutating them:
+ */
+let barStartMoment = $computed({
+	get: () => {
+		return moment(this.bar[props.barStart]);
 	},
-
-	inject: [
-		"getHourCount",
-		"ganttChartProps",
-		"initDragOfBarsFromBundle",
-		"moveBarsFromBundleOfPushedBar",
-		"setDragLimitsOfGanttBar",
-		"onBarEvent",
-		"onDragendBar",
-		"getMinGapBetweenBars",
-		"snapMinutes",
-	],
-
-	components: {
-		"svg-icon": SvgIcon,
+	set: (value) => {
+		const snap = this.snapMinutes();
+		if (snap <= 1) this.bar[props.barStart] = moment(value).format("YYYY-MM-DD HH:mm:ss");
+		else this.bar[props.barStart] = this.snapToTime(moment(value), snap).format("YYYY-MM-DD HH:mm:ss");
 	},
+});
 
-	data() {
+let barEndMoment = $computed({
+	get: () => {
+		return moment(this.bar[props.barEnd]);
+	},
+	set: (value) => {
+		const snap = this.snapMinutes();
+		console.log(snap);
+		if (snap <= 1) this.bar[props.barEnd] = moment(value).format("YYYY-MM-DD HH:mm:ss");
+		else this.bar[props.barEnd] = this.snapToTime(moment(value), snap).format("YYYY-MM-DD HH:mm:ss");
+	},
+});
+
+let barConfig = $computed(() => {
+	if (this.bar.ganttBarConfig) {
 		return {
-			showTooltip: false,
-			tooltipTimeout: null,
-			dragLimitLeft: null,
-			dragLimitRight: null,
-			isDragging: false,
-			isMainBarOfDrag: false, // is this the bar that was clicked on when starting to drag
-			// or is it dragged along some other bar from the same bundle
-			cursorOffsetX: 0,
-			mousemoveCallback: null, // gets initialized when starting to drag
-			// possible values: drag, dragByHandleLeft, dragByHandleRight,
-			barStartBeforeDrag: null,
-			barEndBeforeDrag: null,
-			icons: {
-				mdiDragVerticalVariant,
-			},
+			...this.bar.ganttBarConfig,
+			background: this.bar.ganttBarConfig.isShadow
+				? "grey"
+				: this.bar.ganttBarConfig.background || this.bar.ganttBarConfig.backgroundColor,
+			opacity: this.bar.ganttBarConfig.isShadow ? "0.3" : this.bar.ganttBarConfig.opacity,
 		};
-	},
+	}
+	return {};
+});
 
-	computed: {
-		// use these computed moment objects to work with the bar's start/end dates:
-		// instead of directly mutating them:
-		barStartMoment: {
-			get() {
-				return moment(this.bar[this.barStart]);
-			},
-			set(value) {
-				const snap = this.snapMinutes();
-				if (snap <= 1) this.bar[this.barStart] = moment(value).format("YYYY-MM-DD HH:mm:ss");
-				else this.bar[this.barStart] = this.snapToTime(moment(value), snap).format("YYYY-MM-DD HH:mm:ss");
-			},
-		},
+let barStyle = $computed(() => {
+	let xStart = this.mapTimeToPosition(this.barStartMoment);
+	let xEnd = this.mapTimeToPosition(this.barEndMoment);
+	return {
+		...(this.barConfig || {}),
+		left: `${xStart}px`,
+		width: `${xEnd - xStart}px`,
+		height: `${this.ganttChartProps.rowHeight - 6}px`,
+		zIndex: this.barConfig.zIndex || (this.isDragging ? 2 : 1),
+		"--bar-colour": this.barConfig.background,
+	};
+});
 
-		barEndMoment: {
-			get() {
-				return moment(this.bar[this.barEnd]);
-			},
-			set(value) {
-				const snap = this.snapMinutes();
-				console.log(snap);
-				if (snap <= 1) this.bar[this.barEnd] = moment(value).format("YYYY-MM-DD HH:mm:ss");
-				else this.bar[this.barEnd] = this.snapToTime(moment(value), snap).format("YYYY-MM-DD HH:mm:ss");
-			},
-		},
+let tooltipStyle = $computed(() => {
+	return {
+		left: this.barStyle.left,
+		top: `${this.ganttChartProps.rowHeight}px`,
+	};
+});
 
-		barConfig() {
-			if (this.bar.ganttBarConfig) {
-				return {
-					...this.bar.ganttBarConfig,
-					background: this.bar.ganttBarConfig.isShadow
-						? "grey"
-						: this.bar.ganttBarConfig.background || this.bar.ganttBarConfig.backgroundColor,
-					opacity: this.bar.ganttBarConfig.isShadow ? "0.3" : this.bar.ganttBarConfig.opacity,
-				};
-			}
-			return {};
-		},
+let chartStartMoment = $computed(() => {
+	return moment(this.ganttChartProps.chartStart);
+});
 
-		barStyle() {
-			let xStart = this.mapTimeToPosition(this.barStartMoment);
-			let xEnd = this.mapTimeToPosition(this.barEndMoment);
-			return {
-				...(this.barConfig || {}),
-				left: `${xStart}px`,
-				width: `${xEnd - xStart}px`,
-				height: `${this.ganttChartProps.rowHeight - 6}px`,
-				zIndex: this.barConfig.zIndex || (this.isDragging ? 2 : 1),
-				"--bar-colour": this.barConfig.background,
-			};
-		},
+let chartEndMoment = $computed(() => {
+	return moment(this.ganttChartProps.chartEnd);
+});
 
-		tooltipStyle() {
-			return {
-				left: this.barStyle.left,
-				top: `${this.ganttChartProps.rowHeight}px`,
-			};
-		},
+/* ******************************************
+ * METHODS
+ ****************************************** */
 
-		chartStartMoment() {
-			return moment(this.ganttChartProps.chartStart);
-		},
+function snapToTime(m, snap = 1) {
+	const elapsed = m.minute() % snap;
+	if (elapsed !== 0) {
+		const remainder = snap - elapsed;
+		m.add(remainder, "minutes");
+	}
+	return m;
+}
 
-		chartEndMoment() {
-			return moment(this.ganttChartProps.chartEnd);
-		},
-	},
+function onMouseenter(e) {
+	if (this.tooltipTimeout) {
+		clearTimeout(this.tooltipTimeout);
+	}
+	this.tooltipTimeout = setTimeout(() => (this.showTooltip = true), 800);
+	this.onBarEvent({ event: e, type: e.type }, this);
+}
 
-	methods: {
-		snapToTime(m, snap = 1) {
-			const elapsed = m.minute() % snap;
-			if (elapsed !== 0) {
-				const remainder = snap - elapsed;
-				m.add(remainder, "minutes");
-			}
-			return m;
-		},
+function onMouseleave(e) {
+	clearTimeout(this.tooltipTimeout);
+	this.showTooltip = false;
+	this.onBarEvent({ event: e, type: e.type }, this);
+}
 
-		onMouseenter(e) {
-			if (this.tooltipTimeout) {
-				clearTimeout(this.tooltipTimeout);
-			}
-			this.tooltipTimeout = setTimeout(() => (this.showTooltip = true), 800);
-			this.onBarEvent({ event: e, type: e.type }, this);
-		},
+function onContextmenu(e) {
+	const time = this.mapPositionToTime(e.clientX - props.barContainer.left).format("YYYY-MM-DD HH:mm:ss");
+	this.onBarEvent({ event: e, type: e.type, time }, this);
+}
 
-		onMouseleave(e) {
-			clearTimeout(this.tooltipTimeout);
-			this.showTooltip = false;
-			this.onBarEvent({ event: e, type: e.type }, this);
-		},
+function onClick(e) {
+	const time = this.mapPositionToTime(e.clientX - props.barContainer.left).format("YYYY-MM-DD HH:mm:ss");
+	this.onBarEvent({ event: e, type: e.type, time }, this);
+}
 
-		onContextmenu(e) {
-			const time = this.mapPositionToTime(e.clientX - this.barContainer.left).format("YYYY-MM-DD HH:mm:ss");
-			this.onBarEvent({ event: e, type: e.type, time }, this);
-		},
+function onDblclick(e) {
+	const time = this.mapPositionToTime(e.clientX - props.barContainer.left).format("YYYY-MM-DD HH:mm:ss");
+	this.onBarEvent({ event: e, type: e.type, time }, this);
+}
 
-		onClick(e) {
-			const time = this.mapPositionToTime(e.clientX - this.barContainer.left).format("YYYY-MM-DD HH:mm:ss");
-			this.onBarEvent({ event: e, type: e.type, time }, this);
-		},
+function onMousedown(e) {
+	e.preventDefault();
+	if (e.button === 2) {
+		return;
+	}
+	if (!this.barConfig.immobile && !this.barConfig.isShadow) {
+		this.setDragLimitsOfGanttBar(this);
+		// initialize the dragging on next mousemove event:
+		window.addEventListener("mousemove", this.onFirstMousemove, { once: true });
+		// if next mousemove happens after mouse up (if user just presses mouse button down, then up, without moving):
+		window.addEventListener("mouseup", () => window.removeEventListener("mousemove", this.onFirstMousemove), {
+			once: true,
+		});
+	}
+	const time = this.mapPositionToTime(e.clientX - props.barContainer.left).format("YYYY-MM-DD HH:mm:ss");
+	this.onBarEvent({ event: e, type: e.type, time }, this);
+}
 
-		onDblclick(e) {
-			const time = this.mapPositionToTime(e.clientX - this.barContainer.left).format("YYYY-MM-DD HH:mm:ss");
-			this.onBarEvent({ event: e, type: e.type, time }, this);
-		},
+function onFirstMousemove(e) {
+	this.isMainBarOfDrag = true;
+	// this method is injected here by ProjectGanttChart.vue, and calls initDrag()
+	// for all ProjectGanttBars that belong to the same bundle as this bar:
+	this.initDragOfBarsFromBundle(this, e);
+}
 
-		onMousedown(e) {
-			e.preventDefault();
-			if (e.button === 2) {
-				return;
-			}
-			if (!this.barConfig.immobile && !this.barConfig.isShadow) {
-				this.setDragLimitsOfGanttBar(this);
-				// initialize the dragging on next mousemove event:
-				window.addEventListener("mousemove", this.onFirstMousemove, { once: true });
-				// if next mousemove happens after mouse up (if user just presses mouse button down, then up, without moving):
-				window.addEventListener(
-					"mouseup",
-					() => window.removeEventListener("mousemove", this.onFirstMousemove),
-					{ once: true }
+/* --------------------------------------------------------- */
+/* ------------ METHODS FOR DRAGGING THE BAR -------------- */
+/* --------------------------------------------------------- */
+function initDrag(e) {
+	// "e" must be the mousedown event
+	this.isDragging = true;
+	this.barStartBeforeDrag = this.bar[props.barStart];
+	this.barEndBeforeDrag = this.bar[props.barEnd];
+	let barX = this.$refs["project-gantt-bar"].getBoundingClientRect().left;
+	this.cursorOffsetX = e.clientX - barX;
+
+	if (e.target.classList.contains("project-gantt-bar-handle-left")) {
+		document.body.style.cursor = "w-resize";
+		this.mousemoveCallback = this.dragByHandleLeft;
+	} else if (e.target.classList.contains("project-gantt-bar-handle-right")) {
+		document.body.style.cursor = "w-resize";
+		this.mousemoveCallback = this.dragByHandleRight;
+	} else {
+		this.mousemoveCallback = throttle(this.drag, 50);
+	}
+
+	window.addEventListener("mousemove", this.mousemoveCallback);
+	window.addEventListener("mouseup", this.endDrag);
+}
+
+function drag(e) {
+	let barWidth = this.$refs["project-gantt-bar"].getBoundingClientRect().width;
+	let newXStart = e.clientX - props.barContainer.left - this.cursorOffsetX;
+	let newXEnd = newXStart + barWidth;
+	if (this.isPosOutOfDragRange(newXStart, newXEnd)) {
+		return;
+	}
+	this.barStartMoment = this.mapPositionToTime(newXStart);
+	this.barEndMoment = this.mapPositionToTime(newXEnd);
+	this.manageOverlapping();
+	this.onBarEvent({ event: e, type: "drag" }, this);
+}
+
+function dragByHandleLeft(e) {
+	let newXStart = e.clientX - props.barContainer.left;
+	let newStartMoment = this.mapPositionToTime(newXStart);
+	if (newStartMoment.isSameOrAfter(this.barEndMoment) || this.isPosOutOfDragRange(newXStart, null)) {
+		return;
+	}
+	this.barStartMoment = newStartMoment;
+	this.manageOverlapping();
+}
+
+function dragByHandleRight(e) {
+	let newXEnd = e.clientX - props.barContainer.left;
+	let newEndMoment = this.mapPositionToTime(newXEnd);
+	if (newEndMoment.isSameOrBefore(this.barStartMoment) || this.isPosOutOfDragRange(null, newXEnd)) {
+		return;
+	}
+	this.barEndMoment = newEndMoment;
+	this.manageOverlapping();
+}
+
+function isPosOutOfDragRange(xStart, xEnd) {
+	if (!this.ganttChartProps.pushOnOverlap) {
+		return false;
+	}
+	if (xStart && this.dragLimitLeft !== null && xStart < this.dragLimitLeft + this.getMinGapBetweenBars()) {
+		return true;
+	}
+	if (xEnd && this.dragLimitRight !== null && xEnd > this.dragLimitRight - this.getMinGapBetweenBars()) {
+		return true;
+	}
+	return false;
+}
+
+function endDrag(e) {
+	this.isDragging = false;
+	this.dragLimitLeft = null;
+	this.dragLimitRight = null;
+	document.body.style.cursor = "auto";
+	window.removeEventListener("mousemove", this.mousemoveCallback);
+	window.removeEventListener("mouseup", this.endDrag);
+	if (this.isMainBarOfDrag) {
+		this.onDragendBar(e, this);
+		this.isMainBarOfDrag = false;
+	}
+}
+
+function snapBack() {
+	this.barStartMoment = this.barStartBeforeDrag;
+	this.barEndMoment = this.barEndBeforeDrag;
+}
+
+function manageOverlapping() {
+	if (!this.ganttChartProps.pushOnOverlap || this.barConfig.pushOnOverlap === false) {
+		return;
+	}
+	let currentBar = this.bar;
+	let { overlapBar, overlapType } = this.getOverlapBarAndType(currentBar);
+	while (overlapBar) {
+		let minuteDiff;
+		let currentStartMoment = moment(currentBar[props.barStart]);
+		let currentEndMoment = moment(currentBar[props.barEnd]);
+		let overlapStartMoment = moment(overlapBar[props.barStart]);
+		let overlapEndMoment = moment(overlapBar[props.barEnd]);
+		switch (overlapType) {
+			case "left":
+				minuteDiff = overlapEndMoment.diff(currentStartMoment, "minutes", true) + this.getMinGapBetweenBars();
+				overlapBar[props.barEnd] = currentStartMoment
+					.subtract(this.getMinGapBetweenBars(), "minutes", true)
+					.format("YYYY-MM-DD HH:mm:ss");
+				overlapBar[props.barStart] = overlapStartMoment
+					.subtract(minuteDiff, "minutes", true)
+					.format("YYYY-MM-DD HH:mm:ss");
+				break;
+			case "right":
+				minuteDiff = currentEndMoment.diff(overlapStartMoment, "minutes", true) + this.getMinGapBetweenBars();
+				overlapBar[props.barStart] = currentEndMoment
+					.add(this.getMinGapBetweenBars(), "minutes", true)
+					.format("YYYY-MM-DD HH:mm:ss");
+				overlapBar[props.barEnd] = overlapEndMoment
+					.add(minuteDiff, "minutes", true)
+					.format("YYYY-MM-DD HH:mm:ss");
+				break;
+			default:
+				// eslint-disable-next-line
+				console.warn(
+					"One bar is inside of the other one! This should never occur while push-on-overlap is active!"
 				);
-			}
-			const time = this.mapPositionToTime(e.clientX - this.barContainer.left).format("YYYY-MM-DD HH:mm:ss");
-			this.onBarEvent({ event: e, type: e.type, time }, this);
-		},
-
-		onFirstMousemove(e) {
-			this.isMainBarOfDrag = true;
-			// this method is injected here by ProjectGanttChart.vue, and calls initDrag()
-			// for all ProjectGanttBars that belong to the same bundle as this bar:
-			this.initDragOfBarsFromBundle(this, e);
-		},
-
-		/* --------------------------------------------------------- */
-		/* ------------- METHODS FOR DRAGGING THE BAR -------------- */
-		/* --------------------------------------------------------- */
-		initDrag(e) {
-			// "e" must be the mousedown event
-			this.isDragging = true;
-			this.barStartBeforeDrag = this.bar[this.barStart];
-			this.barEndBeforeDrag = this.bar[this.barEnd];
-			let barX = this.$refs["project-gantt-bar"].getBoundingClientRect().left;
-			this.cursorOffsetX = e.clientX - barX;
-
-			if (e.target.classList.contains("project-gantt-bar-handle-left")) {
-				document.body.style.cursor = "w-resize";
-				this.mousemoveCallback = this.dragByHandleLeft;
-			} else if (e.target.classList.contains("project-gantt-bar-handle-right")) {
-				document.body.style.cursor = "w-resize";
-				this.mousemoveCallback = this.dragByHandleRight;
-			} else {
-				this.mousemoveCallback = throttle(this.drag, 50);
-			}
-
-			window.addEventListener("mousemove", this.mousemoveCallback);
-			window.addEventListener("mouseup", this.endDrag);
-		},
-
-		drag(e) {
-			let barWidth = this.$refs["project-gantt-bar"].getBoundingClientRect().width;
-			let newXStart = e.clientX - this.barContainer.left - this.cursorOffsetX;
-			let newXEnd = newXStart + barWidth;
-			if (this.isPosOutOfDragRange(newXStart, newXEnd)) {
 				return;
-			}
-			this.barStartMoment = this.mapPositionToTime(newXStart);
-			this.barEndMoment = this.mapPositionToTime(newXEnd);
-			this.manageOverlapping();
-			this.onBarEvent({ event: e, type: "drag" }, this);
-		},
+		}
+		this.moveBarsFromBundleOfPushedBar(overlapBar, minuteDiff, overlapType);
+		currentBar = overlapBar;
+		({ overlapBar, overlapType } = this.getOverlapBarAndType(overlapBar));
+	}
+}
 
-		dragByHandleLeft(e) {
-			let newXStart = e.clientX - this.barContainer.left;
-			let newStartMoment = this.mapPositionToTime(newXStart);
-			if (newStartMoment.isSameOrAfter(this.barEndMoment) || this.isPosOutOfDragRange(newXStart, null)) {
-				return;
-			}
-			this.barStartMoment = newStartMoment;
-			this.manageOverlapping();
-		},
-
-		dragByHandleRight(e) {
-			let newXEnd = e.clientX - this.barContainer.left;
-			let newEndMoment = this.mapPositionToTime(newXEnd);
-			if (newEndMoment.isSameOrBefore(this.barStartMoment) || this.isPosOutOfDragRange(null, newXEnd)) {
-				return;
-			}
-			this.barEndMoment = newEndMoment;
-			this.manageOverlapping();
-		},
-
-		isPosOutOfDragRange(xStart, xEnd) {
-			if (!this.ganttChartProps.pushOnOverlap) {
-				return false;
-			}
-			if (xStart && this.dragLimitLeft !== null && xStart < this.dragLimitLeft + this.getMinGapBetweenBars()) {
-				return true;
-			}
-			if (xEnd && this.dragLimitRight !== null && xEnd > this.dragLimitRight - this.getMinGapBetweenBars()) {
-				return true;
-			}
+function getOverlapBarAndType(bar) {
+	let barStartMoment = moment(bar[props.barStart]);
+	let barEndMoment = moment(bar[props.barEnd]);
+	let overlapLeft, overlapRight, overlapInBetween;
+	let overlapBar = this.allBarsInRow.find((otherBar) => {
+		if (otherBar === bar || otherBar.ganttBarConfig.pushOnOverlap === false) {
 			return false;
-		},
+		}
+		let otherBarStart = moment(otherBar[props.barStart]);
+		let otherBarEnd = moment(otherBar[props.barEnd]);
+		overlapLeft = barStartMoment.isBetween(otherBarStart, otherBarEnd);
+		overlapRight = barEndMoment.isBetween(otherBarStart, otherBarEnd);
+		overlapInBetween =
+			otherBarStart.isBetween(barStartMoment, barEndMoment) ||
+			otherBarEnd.isBetween(barStartMoment, barEndMoment);
+		return overlapLeft || overlapRight || overlapInBetween;
+	});
+	let overlapType = overlapLeft ? "left" : overlapRight ? "right" : overlapInBetween ? "between" : null;
+	return { overlapBar, overlapType };
+}
 
-		endDrag(e) {
-			this.isDragging = false;
-			this.dragLimitLeft = null;
-			this.dragLimitRight = null;
-			document.body.style.cursor = "auto";
-			window.removeEventListener("mousemove", this.mousemoveCallback);
-			window.removeEventListener("mouseup", this.endDrag);
-			if (this.isMainBarOfDrag) {
-				this.onDragendBar(e, this);
-				this.isMainBarOfDrag = false;
-			}
-		},
+// this s used in ProjectGanttChart, when a bar from a bundle is pushed
+// so that bars from its bundle also get pushed
+function moveBarByMinutesAndPush(minuteCount, direction) {
+	switch (direction) {
+		case "left":
+			this.barStartMoment = moment(this.barStartMoment).subtract(minuteCount, "minutes", true);
+			this.barEndMoment = moment(this.barEndMoment).subtract(minuteCount, "minutes", true);
+			break;
+		case "right":
+			this.barStartMoment = moment(this.barStartMoment).add(minuteCount, "minutes", true);
+			this.barEndMoment = moment(this.barEndMoment).add(minuteCount, "minutes", true);
+			break;
+		default:
+			// eslint-disable-next-line
+			console.warn("wrong direction in moveBarByMinutesAndPush");
+			return;
+	}
+	this.manageOverlapping();
+}
 
-		snapBack() {
-			this.barStartMoment = this.barStartBeforeDrag;
-			this.barEndMoment = this.barEndBeforeDrag;
-		},
+/* --------------------------------------------------------- */
+/* ------ MAPPING POSITION TO TIME (AND VICE VERSA) ------- */
+/* --------------------------------------------------------- */
+function mapTimeToPosition(time) {
+	let hourDiffFromStart = moment(time).diff(this.chartStartMoment, "hour", true);
+	return (hourDiffFromStart / this.getHourCount()) * props.barContainer.width;
+}
 
-		manageOverlapping() {
-			if (!this.ganttChartProps.pushOnOverlap || this.barConfig.pushOnOverlap === false) {
-				return;
-			}
-			let currentBar = this.bar;
-			let { overlapBar, overlapType } = this.getOverlapBarAndType(currentBar);
-			while (overlapBar) {
-				let minuteDiff;
-				let currentStartMoment = moment(currentBar[this.barStart]);
-				let currentEndMoment = moment(currentBar[this.barEnd]);
-				let overlapStartMoment = moment(overlapBar[this.barStart]);
-				let overlapEndMoment = moment(overlapBar[this.barEnd]);
-				switch (overlapType) {
-					case "left":
-						minuteDiff =
-							overlapEndMoment.diff(currentStartMoment, "minutes", true) + this.getMinGapBetweenBars();
-						overlapBar[this.barEnd] = currentStartMoment
-							.subtract(this.getMinGapBetweenBars(), "minutes", true)
-							.format("YYYY-MM-DD HH:mm:ss");
-						overlapBar[this.barStart] = overlapStartMoment
-							.subtract(minuteDiff, "minutes", true)
-							.format("YYYY-MM-DD HH:mm:ss");
-						break;
-					case "right":
-						minuteDiff =
-							currentEndMoment.diff(overlapStartMoment, "minutes", true) + this.getMinGapBetweenBars();
-						overlapBar[this.barStart] = currentEndMoment
-							.add(this.getMinGapBetweenBars(), "minutes", true)
-							.format("YYYY-MM-DD HH:mm:ss");
-						overlapBar[this.barEnd] = overlapEndMoment
-							.add(minuteDiff, "minutes", true)
-							.format("YYYY-MM-DD HH:mm:ss");
-						break;
-					default:
-						// eslint-disable-next-line
-						console.warn(
-							"One bar is inside of the other one! This should never occur while push-on-overlap is active!"
-						);
-						return;
-				}
-				this.moveBarsFromBundleOfPushedBar(overlapBar, minuteDiff, overlapType);
-				currentBar = overlapBar;
-				({ overlapBar, overlapType } = this.getOverlapBarAndType(overlapBar));
-			}
-		},
+function mapPositionToTime(xPos) {
+	let hourDiffFromStart = (xPos / props.barContainer.width) * this.getHourCount();
+	return this.chartStartMoment.clone().add(hourDiffFromStart, "hours");
+}
 
-		getOverlapBarAndType(bar) {
-			let barStartMoment = moment(bar[this.barStart]);
-			let barEndMoment = moment(bar[this.barEnd]);
-			let overlapLeft, overlapRight, overlapInBetween;
-			let overlapBar = this.allBarsInRow.find((otherBar) => {
-				if (otherBar === bar || otherBar.ganttBarConfig.pushOnOverlap === false) {
-					return false;
-				}
-				let otherBarStart = moment(otherBar[this.barStart]);
-				let otherBarEnd = moment(otherBar[this.barEnd]);
-				overlapLeft = barStartMoment.isBetween(otherBarStart, otherBarEnd);
-				overlapRight = barEndMoment.isBetween(otherBarStart, otherBarEnd);
-				overlapInBetween =
-					otherBarStart.isBetween(barStartMoment, barEndMoment) ||
-					otherBarEnd.isBetween(barStartMoment, barEndMoment);
-				return overlapLeft || overlapRight || overlapInBetween;
-			});
-			let overlapType = overlapLeft ? "left" : overlapRight ? "right" : overlapInBetween ? "between" : null;
-			return { overlapBar, overlapType };
-		},
-
-		// this is used in ProjectGanttChart, when a bar from a bundle is pushed
-		// so that bars from its bundle also get pushed
-		moveBarByMinutesAndPush(minuteCount, direction) {
-			switch (direction) {
-				case "left":
-					this.barStartMoment = moment(this.barStartMoment).subtract(minuteCount, "minutes", true);
-					this.barEndMoment = moment(this.barEndMoment).subtract(minuteCount, "minutes", true);
-					break;
-				case "right":
-					this.barStartMoment = moment(this.barStartMoment).add(minuteCount, "minutes", true);
-					this.barEndMoment = moment(this.barEndMoment).add(minuteCount, "minutes", true);
-					break;
-				default:
-					// eslint-disable-next-line
-					console.warn("wrong direction in moveBarByMinutesAndPush");
-					return;
-			}
-			this.manageOverlapping();
-		},
-
-		/* --------------------------------------------------------- */
-		/* ------- MAPPING POSITION TO TIME (AND VICE VERSA) ------- */
-		/* --------------------------------------------------------- */
-		mapTimeToPosition(time) {
-			let hourDiffFromStart = moment(time).diff(this.chartStartMoment, "hour", true);
-			return (hourDiffFromStart / this.getHourCount()) * this.barContainer.width;
-		},
-
-		mapPositionToTime(xPos) {
-			let hourDiffFromStart = (xPos / this.barContainer.width) * this.getHourCount();
-			return this.chartStartMoment.clone().add(hourDiffFromStart, "hours");
-		},
-	},
-
-	filters: {
-		TimeFilter(value) {
-			return moment(value).format("HH:mm");
-		},
-	},
+const TimeFilter = (value) => {
+	return moment(value).format("HH:mm");
 };
 </script>
 
